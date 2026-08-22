@@ -12,7 +12,7 @@ android {
         // QUAN TRỌNG: Đổi dòng dưới thành ĐÚNG package name của app mod
         // Lấy bằng lệnh: aapt dump badging mod.apk | grep package
         // ============================================================
-        applicationId "REPLACE_WITH_TARGET_PACKAGE_NAME"
+        applicationId "it.paranoidsquirrels.idleguildmastes"
 
         minSdk 21
         targetSdk 33
