@@ -23,10 +23,16 @@ import java.util.zip.ZipOutputStream
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
+    private var pendingExportFile: File? = null
 
     private val pickFileLauncher =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri != null) confirmThenImportFromUri(uri)
+        }
+
+    private val createDocumentLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            if (uri != null) saveExportedFileToUri(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,8 +60,21 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { chooseImportSource() }
         }
 
+        val saveElsewhereButton = Button(this).apply {
+            text = "Lưu bản export gần nhất vào vị trí khác"
+            setOnClickListener {
+                val file = pendingExportFile
+                if (file == null) {
+                    statusText.text = "Chưa có bản export nào trong phiên này. Hãy Export trước."
+                } else {
+                    createDocumentLauncher.launch(file.name)
+                }
+            }
+        }
+
         layout.addView(exportButton)
         layout.addView(importButton)
+        layout.addView(saveElsewhereButton)
         layout.addView(statusText)
         setContentView(layout)
     }
@@ -129,6 +148,7 @@ class MainActivity : AppCompatActivity() {
                 val zipFile = File(backupsDir, "save_$timestamp.zip")
                 zipDirectory(stagingFolder, zipFile)
                 stagingFolder.deleteRecursively()
+                pendingExportFile = zipFile
 
                 runOnUiThread {
                     statusText.text = "Xong!\n\n" +
@@ -136,9 +156,42 @@ class MainActivity : AppCompatActivity() {
                         "File backup: ${zipFile.absolutePath}\n\n" +
                         "Lấy ra máy tính bằng:\n" +
                         "adb pull \"${zipFile.absolutePath}\""
+
+                    AlertDialog.Builder(this)
+                        .setTitle("Export xong")
+                        .setMessage("Bạn có muốn lưu file zip này vào một vị trí cụ thể (Tải xuống, Google Drive, thẻ nhớ ngoài...) không?")
+                        .setPositiveButton("Chọn vị trí lưu") { _, _ ->
+                            createDocumentLauncher.launch(zipFile.name)
+                        }
+                        .setNegativeButton("Để sau", null)
+                        .show()
                 }
             } catch (e: Exception) {
                 runOnUiThread { statusText.text = "Lỗi export: ${e.message}" }
+            }
+        }.start()
+    }
+
+    // ---------------------- SAVE TO CUSTOM LOCATION ----------------------
+
+    private fun saveExportedFileToUri(uri: Uri) {
+        val file = pendingExportFile
+        if (file == null) {
+            statusText.text = "Không tìm thấy file export để lưu."
+            return
+        }
+        statusText.text = "Đang lưu vào vị trí đã chọn..."
+        Thread {
+            try {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    FileInputStream(file).use { input -> input.copyTo(output) }
+                } ?: throw IllegalStateException("Không mở được vị trí lưu")
+
+                runOnUiThread {
+                    statusText.text = "Đã lưu \"${file.name}\" vào vị trí bạn chọn."
+                }
+            } catch (e: Exception) {
+                runOnUiThread { statusText.text = "Lỗi khi lưu: ${e.message}" }
             }
         }.start()
     }
