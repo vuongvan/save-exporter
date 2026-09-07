@@ -236,46 +236,80 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmThenImportFromUri(uri: Uri) {
-        AlertDialog.Builder(this)
-            .setTitle("Xác nhận Import")
-            .setMessage("Thao tác này sẽ ghi đè lên dữ liệu hiện tại của app. Tiếp tục?")
-            .setPositiveButton("Import") { _, _ -> importFromUri(uri) }
-            .setNegativeButton("Hủy", null)
-            .show()
+        val internalDataDir = filesDir.parentFile
+        if (internalDataDir == null) {
+            statusText.text = "Không tìm thấy thư mục data nội bộ"
+            return
+        }
+        chooseDestinationFolder(internalDataDir) { targetDir, label ->
+            AlertDialog.Builder(this)
+                .setTitle("Xác nhận Import")
+                .setMessage("Import vào \"$label\" sẽ ghi đè dữ liệu trùng tên tại đó. Tiếp tục?")
+                .setPositiveButton("Import") { _, _ -> importFromUri(uri, targetDir) }
+                .setNegativeButton("Hủy", null)
+                .show()
+        }
     }
 
     private fun confirmThenImportFromFile(file: File) {
-        AlertDialog.Builder(this)
-            .setTitle("Xác nhận Import")
-            .setMessage("Import \"${file.name}\" sẽ ghi đè lên dữ liệu hiện tại của app. Tiếp tục?")
-            .setPositiveButton("Import") { _, _ -> importFromFile(file) }
-            .setNegativeButton("Hủy", null)
-            .show()
+        val internalDataDir = filesDir.parentFile
+        if (internalDataDir == null) {
+            statusText.text = "Không tìm thấy thư mục data nội bộ"
+            return
+        }
+        chooseDestinationFolder(internalDataDir) { targetDir, label ->
+            AlertDialog.Builder(this)
+                .setTitle("Xác nhận Import")
+                .setMessage("Import \"${file.name}\" vào \"$label\" sẽ ghi đè dữ liệu trùng tên tại đó. Tiếp tục?")
+                .setPositiveButton("Import") { _, _ -> importFromFile(file, targetDir) }
+                .setNegativeButton("Hủy", null)
+                .show()
+        }
     }
 
-    private fun importFromUri(uri: Uri) {
+    private fun chooseDestinationFolder(root: File, onChosen: (File, String) -> Unit) {
+        Thread {
+            val folders = root.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()
+            runOnUiThread {
+                val labels = mutableListOf("📁 (Thư mục gốc - $packageName)")
+                labels.addAll(folders.map { it.name })
+                AlertDialog.Builder(this)
+                    .setTitle("Chọn thư mục để import vào")
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        if (which == 0) {
+                            onChosen(root, "(Thư mục gốc)")
+                        } else {
+                            val folder = folders[which - 1]
+                            onChosen(folder, folder.name)
+                        }
+                    }
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun importFromUri(uri: Uri, targetDir: File) {
         statusText.text = "Đang import..."
         Thread {
             try {
-                val internalDataDir = filesDir.parentFile
-                    ?: throw IllegalStateException("Không tìm thấy thư mục data nội bộ")
+                targetDir.mkdirs()
 
                 val displayName = getFileName(uri) ?: "imported_file"
                 val looksLikeZip = displayName.endsWith(".zip", ignoreCase = true) || isZipStream(uri)
 
                 if (looksLikeZip) {
                     contentResolver.openInputStream(uri)?.use { input ->
-                        unzipStreamInto(input, internalDataDir)
+                        unzipStreamInto(input, targetDir)
                     }
                 } else {
-                    val outFile = File(internalDataDir, displayName)
+                    val outFile = File(targetDir, displayName)
                     contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(outFile).use { output -> input.copyTo(output) }
                     }
                 }
 
                 runOnUiThread {
-                    statusText.text = "Import thành công vào:\n${internalDataDir.absolutePath}\n\n" +
+                    statusText.text = "Import thành công vào:\n${targetDir.absolutePath}\n\n" +
                         "Hãy force stop rồi mở lại game."
                 }
             } catch (e: Exception) {
@@ -284,19 +318,18 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun importFromFile(file: File) {
+    private fun importFromFile(file: File, targetDir: File) {
         statusText.text = "Đang import..."
         Thread {
             try {
-                val internalDataDir = filesDir.parentFile
-                    ?: throw IllegalStateException("Không tìm thấy thư mục data nội bộ")
+                targetDir.mkdirs()
 
                 FileInputStream(file).use { input ->
-                    unzipStreamInto(input, internalDataDir)
+                    unzipStreamInto(input, targetDir)
                 }
 
                 runOnUiThread {
-                    statusText.text = "Import \"${file.name}\" thành công vào:\n${internalDataDir.absolutePath}\n\n" +
+                    statusText.text = "Import \"${file.name}\" thành công vào:\n${targetDir.absolutePath}\n\n" +
                         "Hãy force stop rồi mở lại game."
                 }
             } catch (e: Exception) {
