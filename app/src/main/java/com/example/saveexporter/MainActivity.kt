@@ -101,16 +101,54 @@ class MainActivity : AppCompatActivity() {
             val checkedItems = BooleanArray(items.size) { true }
 
             runOnUiThread {
-                statusText.text = "Chọn thư mục/file cần export"
+                statusText.text = "Bước 1/2: chọn thư mục/file cấp ngoài"
                 AlertDialog.Builder(this)
-                    .setTitle("Chọn thư mục/file để export")
+                    .setTitle("Bước 1/2: chọn thư mục/file")
+                    .setMultiChoiceItems(labels, checkedItems) { _, which, isChecked ->
+                        checkedItems[which] = isChecked
+                    }
+                    .setPositiveButton("Tiếp tục") { _, _ ->
+                        val selectedTopLevel = items.filterIndexed { index, _ -> checkedItems[index] }
+                        if (selectedTopLevel.isEmpty()) {
+                            statusText.text = "Chưa chọn gì để export."
+                        } else {
+                            chooseFilesToExport(internalDataDir, selectedTopLevel)
+                        }
+                    }
+                    .setNegativeButton("Hủy", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun chooseFilesToExport(internalDataDir: File, selectedTopLevel: List<File>) {
+        statusText.text = "Đang liệt kê từng file..."
+        Thread {
+            val allFiles = selectedTopLevel.flatMap { top ->
+                if (top.isFile) listOf(top) else top.walkTopDown().filter { it.isFile }.toList()
+            }.sortedBy { it.relativeTo(internalDataDir).path }
+
+            if (allFiles.isEmpty()) {
+                runOnUiThread { statusText.text = "Không có file nào trong lựa chọn." }
+                return@Thread
+            }
+
+            val relPaths = allFiles.map { it.relativeTo(internalDataDir).path }
+            val sizes = allFiles.map { it.length() }
+            val labels = relPaths.mapIndexed { i, p -> "$p  (${formatSize(sizes[i])})" }.toTypedArray()
+            val checkedItems = BooleanArray(relPaths.size) { true }
+
+            runOnUiThread {
+                statusText.text = "Bước 2/2: bỏ chọn file không cần (${relPaths.size} file)"
+                AlertDialog.Builder(this)
+                    .setTitle("Bước 2/2: chọn file cụ thể")
                     .setMultiChoiceItems(labels, checkedItems) { _, which, isChecked ->
                         checkedItems[which] = isChecked
                     }
                     .setPositiveButton("Export") { _, _ ->
-                        val selected = items.filterIndexed { index, _ -> checkedItems[index] }.map { it.name }
+                        val selected = relPaths.filterIndexed { index, _ -> checkedItems[index] }
                         if (selected.isEmpty()) {
-                            statusText.text = "Chưa chọn gì để export."
+                            statusText.text = "Chưa chọn file nào để export."
                         } else {
                             doExport(selected)
                         }
@@ -121,7 +159,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun doExport(selectedNames: List<String>) {
+    private fun doExport(selectedRelPaths: List<String>) {
         statusText.text = "Đang export..."
         Thread {
             try {
@@ -139,10 +177,11 @@ class MainActivity : AppCompatActivity() {
                 stagingFolder.deleteRecursively()
                 stagingFolder.mkdirs()
 
-                for (name in selectedNames) {
-                    val src = File(internalDataDir, name)
-                    val dst = File(stagingFolder, name)
-                    src.copyRecursively(dst, overwrite = true)
+                for (relPath in selectedRelPaths) {
+                    val src = File(internalDataDir, relPath)
+                    val dst = File(stagingFolder, relPath)
+                    dst.parentFile?.mkdirs()
+                    src.copyTo(dst, overwrite = true)
                 }
 
                 val zipFile = File(backupsDir, "save_$timestamp.zip")
@@ -152,7 +191,7 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     statusText.text = "Xong!\n\n" +
-                        "Đã export: ${selectedNames.joinToString(", ")}\n\n" +
+                        "Đã export ${selectedRelPaths.size} file\n\n" +
                         "File backup: ${zipFile.absolutePath}\n\n" +
                         "Lấy ra máy tính bằng:\n" +
                         "adb pull \"${zipFile.absolutePath}\""
