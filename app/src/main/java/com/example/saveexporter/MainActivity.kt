@@ -3,9 +3,12 @@ package com.example.saveexporter
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -82,81 +85,133 @@ class MainActivity : AppCompatActivity() {
     // ---------------------- EXPORT ----------------------
 
     private fun exportSave() {
-        statusText.text = "Đang quét dữ liệu..."
-        Thread {
-            val internalDataDir = filesDir.parentFile
-            if (internalDataDir == null) {
-                runOnUiThread { statusText.text = "Không tìm thấy thư mục data nội bộ" }
-                return@Thread
-            }
-
-            val items = internalDataDir.listFiles()?.sortedBy { it.name } ?: emptyList()
-            if (items.isEmpty()) {
-                runOnUiThread { statusText.text = "Không có gì để export." }
-                return@Thread
-            }
-
-            val sizes = items.map { calculateSize(it) }
-            val labels = items.mapIndexed { i, f -> "${f.name}  (${formatSize(sizes[i])})" }.toTypedArray()
-            val checkedItems = BooleanArray(items.size) { true }
-
-            runOnUiThread {
-                statusText.text = "Bước 1/2: chọn thư mục/file cấp ngoài"
-                AlertDialog.Builder(this)
-                    .setTitle("Bước 1/2: chọn thư mục/file")
-                    .setMultiChoiceItems(labels, checkedItems) { _, which, isChecked ->
-                        checkedItems[which] = isChecked
-                    }
-                    .setPositiveButton("Tiếp tục") { _, _ ->
-                        val selectedTopLevel = items.filterIndexed { index, _ -> checkedItems[index] }
-                        if (selectedTopLevel.isEmpty()) {
-                            statusText.text = "Chưa chọn gì để export."
-                        } else {
-                            chooseFilesToExport(internalDataDir, selectedTopLevel)
-                        }
-                    }
-                    .setNegativeButton("Hủy", null)
-                    .show()
-            }
-        }.start()
+        val internalDataDir = filesDir.parentFile
+        if (internalDataDir == null) {
+            statusText.text = "Không tìm thấy thư mục data nội bộ"
+            return
+        }
+        showFileBrowser(internalDataDir)
     }
 
-    private fun chooseFilesToExport(internalDataDir: File, selectedTopLevel: List<File>) {
-        statusText.text = "Đang liệt kê từng file..."
-        Thread {
-            val allFiles = selectedTopLevel.flatMap { top ->
-                if (top.isFile) listOf(top) else top.walkTopDown().filter { it.isFile }.toList()
-            }.sortedBy { it.relativeTo(internalDataDir).path }
+    /**
+     * Trình duyệt file: tap để đi vào thư mục, nhấn giữ để chọn/bỏ chọn
+     * file hoặc cả thư mục (không cần đi vào bên trong). Có thể chọn
+     * nhiều mục ở nhiều cấp thư mục khác nhau trước khi export.
+     */
+    private fun showFileBrowser(root: File) {
+        val selected = mutableSetOf<File>()
+        var currentDir = root
+        var entriesInView: List<File?> = emptyList() // null = mục ".." để lên cấp cha
 
-            if (allFiles.isEmpty()) {
-                runOnUiThread { statusText.text = "Không có file nào trong lựa chọn." }
-                return@Thread
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        val pathText = TextView(this).apply {
+            textSize = 12f
+            setPadding(24, 16, 24, 8)
+        }
+
+        val hintText = TextView(this).apply {
+            text = "Chạm: mở thư mục / chọn file · Giữ: chọn cả thư mục hoặc file"
+            textSize = 11f
+            setPadding(24, 0, 24, 8)
+        }
+
+        val listHeightPx = (resources.displayMetrics.heightPixels * 0.5).toInt()
+        val listView = ListView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, listHeightPx)
+        }
+
+        val exportButton = Button(this).apply { text = "Export đã chọn (0)" }
+
+        container.addView(pathText)
+        container.addView(hintText)
+        container.addView(listView)
+        container.addView(exportButton)
+
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf<String>())
+        listView.adapter = adapter
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Duyệt & chọn để export")
+            .setView(container)
+            .setNegativeButton("Đóng", null)
+            .create()
+
+        fun refresh() {
+            val relPath = currentDir.relativeTo(root).path
+            pathText.text = "📂 /${if (relPath.isEmpty()) "" else relPath}"
+
+            val children = currentDir.listFiles()
+                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
+                ?: emptyList()
+
+            val labels = mutableListOf<String>()
+            val entries = mutableListOf<File?>()
+
+            if (currentDir != root) {
+                labels.add(".. (lên thư mục cha)")
+                entries.add(null)
+            }
+            for (entry in children) {
+                val mark = if (selected.contains(entry)) "✓ " else "   "
+                val icon = if (entry.isDirectory) "📁" else "📄"
+                val sizeLabel = if (!entry.isDirectory) "  (${formatSize(entry.length())})" else ""
+                labels.add("$mark$icon ${entry.name}$sizeLabel")
+                entries.add(entry)
             }
 
-            val relPaths = allFiles.map { it.relativeTo(internalDataDir).path }
-            val sizes = allFiles.map { it.length() }
-            val labels = relPaths.mapIndexed { i, p -> "$p  (${formatSize(sizes[i])})" }.toTypedArray()
-            val checkedItems = BooleanArray(relPaths.size) { true }
+            entriesInView = entries
+            adapter.clear()
+            adapter.addAll(labels)
+            adapter.notifyDataSetChanged()
+            exportButton.text = "Export đã chọn (${selected.size})"
+        }
 
-            runOnUiThread {
-                statusText.text = "Bước 2/2: bỏ chọn file không cần (${relPaths.size} file)"
-                AlertDialog.Builder(this)
-                    .setTitle("Bước 2/2: chọn file cụ thể")
-                    .setMultiChoiceItems(labels, checkedItems) { _, which, isChecked ->
-                        checkedItems[which] = isChecked
-                    }
-                    .setPositiveButton("Export") { _, _ ->
-                        val selected = relPaths.filterIndexed { index, _ -> checkedItems[index] }
-                        if (selected.isEmpty()) {
-                            statusText.text = "Chưa chọn file nào để export."
-                        } else {
-                            doExport(selected)
-                        }
-                    }
-                    .setNegativeButton("Hủy", null)
-                    .show()
+        listView.setOnItemClickListener { _, _, position, _ ->
+            when (val entry = entriesInView[position]) {
+                null -> {
+                    currentDir = currentDir.parentFile ?: root
+                    refresh()
+                }
+                else -> if (entry.isDirectory) {
+                    currentDir = entry
+                    refresh()
+                } else {
+                    if (!selected.remove(entry)) selected.add(entry)
+                    refresh()
+                }
             }
-        }.start()
+        }
+
+        listView.setOnItemLongClickListener { _, _, position, _ ->
+            val entry = entriesInView[position] ?: return@setOnItemLongClickListener true
+            if (!selected.remove(entry)) selected.add(entry)
+            refresh()
+            true
+        }
+
+        exportButton.setOnClickListener {
+            if (selected.isEmpty()) {
+                Toast.makeText(this, "Chưa chọn file/thư mục nào", Toast.LENGTH_SHORT).show()
+            } else {
+                dialog.dismiss()
+                statusText.text = "Đang chuẩn bị export..."
+                Thread {
+                    val filesToExport = selected.flatMap { f ->
+                        if (f.isFile) listOf(f) else f.walkTopDown().filter { it.isFile }.toList()
+                    }
+                    val relPaths = filesToExport.map { it.relativeTo(root).path }.distinct()
+                    if (relPaths.isEmpty()) {
+                        runOnUiThread { statusText.text = "Các thư mục đã chọn không có file nào." }
+                    } else {
+                        doExport(relPaths)
+                    }
+                }.start()
+            }
+        }
+
+        refresh()
+        dialog.show()
     }
 
     private fun doExport(selectedRelPaths: List<String>) {
