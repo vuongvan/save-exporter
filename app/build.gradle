@@ -12,12 +12,12 @@ android {
         // QUAN TRỌNG: Đổi dòng dưới thành ĐÚNG package name của app mod
         // Lấy bằng lệnh: aapt dump badging mod.apk | grep package
         // ============================================================
-        applicationId "it.paranoidsquirrels.idleguildmastes"
+        applicationId "com.gameinsight.mirrorsofalbionandroid"
 
         minSdk 21
         targetSdk 33
-        versionCode 159
-        versionName "2.148"
+        versionCode 300627
+        versionName "9.9"
     }
 
     buildTypes {
