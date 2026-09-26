@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val hintText = TextView(this).apply {
-            text = "Chạm: mở thư mục / chọn file · Giữ: chọn cả thư mục hoặc file"
+            text = "Chạm: mở thư mục / chọn file · Giữ: chọn để export hoặc xóa"
             textSize = 11f
             setPadding(24, 0, 24, 8)
         }
@@ -185,8 +185,38 @@ class MainActivity : AppCompatActivity() {
 
         listView.setOnItemLongClickListener { _, _, position, _ ->
             val entry = entriesInView[position] ?: return@setOnItemLongClickListener true
-            if (!selected.remove(entry)) selected.add(entry)
-            refresh()
+            val toggleLabel = if (selected.contains(entry)) "Bỏ chọn" else "Chọn để export"
+            AlertDialog.Builder(this)
+                .setTitle(entry.name)
+                .setItems(arrayOf(toggleLabel, "Xóa vĩnh viễn")) { _, which ->
+                    when (which) {
+                        0 -> {
+                            if (!selected.remove(entry)) selected.add(entry)
+                            refresh()
+                        }
+                        1 -> {
+                            val warnExtra = if (entry.isDirectory) " và toàn bộ nội dung bên trong nó" else ""
+                            AlertDialog.Builder(this)
+                                .setTitle("Xác nhận xóa")
+                                .setMessage("Xóa \"${entry.name}\"$warnExtra? Không thể hoàn tác.")
+                                .setPositiveButton("Xóa") { _, _ ->
+                                    Thread {
+                                        val success = if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
+                                        selected.remove(entry)
+                                        runOnUiThread {
+                                            if (!success) {
+                                                Toast.makeText(this, "Không xóa được \"${entry.name}\"", Toast.LENGTH_SHORT).show()
+                                            }
+                                            refresh()
+                                        }
+                                    }.start()
+                                }
+                                .setNegativeButton("Hủy", null)
+                                .show()
+                        }
+                    }
+                }
+                .show()
             true
         }
 
