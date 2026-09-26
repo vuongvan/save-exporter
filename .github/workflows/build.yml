@@ -1,6 +1,7 @@
 name: Build Save Exporter APK
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
@@ -15,6 +16,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Add Android SDK cmdline-tools to PATH
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses > /dev/null || true
@@ -33,3 +39,4 @@ jobs:
         with:
           name: save-exporter-unsigned
           path: app/build/outputs/apk/debug/app-debug.apk
+          
