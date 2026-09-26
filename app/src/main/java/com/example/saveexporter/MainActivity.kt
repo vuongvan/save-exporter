@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val hintText = TextView(this).apply {
-            text = "Chạm: mở thư mục / chọn file · Giữ: chọn để export hoặc xóa"
+            text = "Chạm: mở thư mục / chọn file · Giữ: chọn cả thư mục"
             textSize = 11f
             setPadding(24, 0, 24, 8)
         }
@@ -121,12 +121,25 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, listHeightPx)
         }
 
-        val exportButton = Button(this).apply { text = "Export đã chọn (0)" }
+        val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+
+        val exportButton = Button(this).apply {
+            text = "Export đã chọn (0)"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val deleteButton = Button(this).apply {
+            text = "Xóa đã chọn (0)"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        buttonRow.addView(exportButton)
+        buttonRow.addView(deleteButton)
 
         container.addView(pathText)
         container.addView(hintText)
         container.addView(listView)
-        container.addView(exportButton)
+        container.addView(buttonRow)
 
         val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf<String>())
         listView.adapter = adapter
@@ -165,6 +178,7 @@ class MainActivity : AppCompatActivity() {
             adapter.addAll(labels)
             adapter.notifyDataSetChanged()
             exportButton.text = "Export đã chọn (${selected.size})"
+            deleteButton.text = "Xóa đã chọn (${selected.size})"
         }
 
         listView.setOnItemClickListener { _, _, position, _ ->
@@ -185,38 +199,8 @@ class MainActivity : AppCompatActivity() {
 
         listView.setOnItemLongClickListener { _, _, position, _ ->
             val entry = entriesInView[position] ?: return@setOnItemLongClickListener true
-            val toggleLabel = if (selected.contains(entry)) "Bỏ chọn" else "Chọn để export"
-            AlertDialog.Builder(this)
-                .setTitle(entry.name)
-                .setItems(arrayOf(toggleLabel, "Xóa vĩnh viễn")) { _, which ->
-                    when (which) {
-                        0 -> {
-                            if (!selected.remove(entry)) selected.add(entry)
-                            refresh()
-                        }
-                        1 -> {
-                            val warnExtra = if (entry.isDirectory) " và toàn bộ nội dung bên trong nó" else ""
-                            AlertDialog.Builder(this)
-                                .setTitle("Xác nhận xóa")
-                                .setMessage("Xóa \"${entry.name}\"$warnExtra? Không thể hoàn tác.")
-                                .setPositiveButton("Xóa") { _, _ ->
-                                    Thread {
-                                        val success = if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
-                                        selected.remove(entry)
-                                        runOnUiThread {
-                                            if (!success) {
-                                                Toast.makeText(this, "Không xóa được \"${entry.name}\"", Toast.LENGTH_SHORT).show()
-                                            }
-                                            refresh()
-                                        }
-                                    }.start()
-                                }
-                                .setNegativeButton("Hủy", null)
-                                .show()
-                        }
-                    }
-                }
-                .show()
+            if (!selected.remove(entry)) selected.add(entry)
+            refresh()
             true
         }
 
@@ -237,6 +221,36 @@ class MainActivity : AppCompatActivity() {
                         doExport(relPaths)
                     }
                 }.start()
+            }
+        }
+
+        deleteButton.setOnClickListener {
+            if (selected.isEmpty()) {
+                Toast.makeText(this, "Chưa chọn file/thư mục nào", Toast.LENGTH_SHORT).show()
+            } else {
+                val names = selected.joinToString(", ") { it.name }
+                AlertDialog.Builder(this)
+                    .setTitle("Xác nhận xóa")
+                    .setMessage("Xóa ${selected.size} mục đã chọn ($names)?\nNếu là thư mục, toàn bộ nội dung bên trong cũng bị xóa. Không thể hoàn tác.")
+                    .setPositiveButton("Xóa") { _, _ ->
+                        val toDelete = selected.toList()
+                        Thread {
+                            var failCount = 0
+                            for (entry in toDelete) {
+                                val success = if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
+                                if (!success) failCount++
+                                selected.remove(entry)
+                            }
+                            runOnUiThread {
+                                if (failCount > 0) {
+                                    Toast.makeText(this, "Không xóa được $failCount mục", Toast.LENGTH_SHORT).show()
+                                }
+                                refresh()
+                            }
+                        }.start()
+                    }
+                    .setNegativeButton("Hủy", null)
+                    .show()
             }
         }
 
